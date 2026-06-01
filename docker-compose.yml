@@ -1,0 +1,17 @@
+services:
+  claude-dev:
+    build: .
+    tty: true
+    environment:
+      - REPO=${REPO}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      # Optional: name shown in the mobile app (defaults to repo name)
+      - SESSION_NAME=${SESSION_NAME:-}
+    volumes:
+      # Persists OAuth token, .claude.json config, dep caches (.m2, .lein, .clojure, .npm)
+      # First run will print an auth URL to logs — tap it on your phone to authenticate
+      - dev-home:/home/dev
+    restart: "no"
+
+volumes:
+  dev-home:
