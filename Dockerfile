@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gnupg \
     rlwrap \
     gosu \
+    bsdutils \
     && rm -rf /var/lib/apt/lists/*
 
 # Java 21 (Temurin)

@@ -61,6 +61,12 @@ fi
 SESSION_NAME="${SESSION_NAME:-${REPO_NAME}}"
 echo "Starting Claude Code remote-control session: ${SESSION_NAME}"
 
-exec gosu dev claude \
-  --add-dir "$TARGET" \
-  --remote-control "${SESSION_NAME}"
+# Use `script` to create a pseudo-TTY so claude's isatty() check passes
+# even when Coolify starts the container detached with no real terminal.
+WRAPPER=$(mktemp /tmp/claude-XXXXXX.sh)
+cat > "$WRAPPER" <<ENDSCRIPT
+#!/bin/bash
+exec gosu dev claude --add-dir "$TARGET" --remote-control "$SESSION_NAME"
+ENDSCRIPT
+chmod +x "$WRAPPER"
+exec script -q -e -c "$WRAPPER" /dev/null
