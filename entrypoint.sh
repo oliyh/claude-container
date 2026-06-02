@@ -47,11 +47,14 @@ if [[ ! -f /home/dev/.claude.json ]]; then
   printf '{"hasCompletedOnboarding":true,"numStartups":1,"projects":{"/home/dev/workspace":{"allowedTools":[],"mcpContextUris":[],"mcpServers":{},"enabledMcpjsonServers":[],"disabledMcpjsonServers":[],"hasTrustDialogAccepted":true,"projectOnboardingSeenCount":0,"hasClaudeMdExternalIncludesApproved":false,"hasClaudeMdExternalIncludesWarningShown":false}}}\n' \
     > /home/dev/.claude.json
 fi
-if [[ ! -f /home/dev/.claude/settings.json ]]; then
-  mkdir -p /home/dev/.claude
-  printf '{"permissions":{"defaultMode":"acceptEdits"},"remoteControlAtStartup":true}\n' \
-    > /home/dev/.claude/settings.json
-fi
+# Machine-managed settings: written every start so changes here reach
+# existing deployments (the /home/dev volume persists across restarts).
+# bypassPermissions = never prompt — safe in this isolated container and
+# required so remote-control sessions can run tests/builds unattended
+# without hanging on a permission request that's awkward to answer from mobile.
+mkdir -p /home/dev/.claude
+printf '{"permissions":{"defaultMode":"bypassPermissions"},"remoteControlAtStartup":true}\n' \
+  > /home/dev/.claude/settings.json
 
 # Write OAuth credentials from env var if provided (avoids interactive /login)
 if [[ -n "${CLAUDE_CREDENTIALS:-}" ]]; then
