@@ -35,7 +35,7 @@ cat ~/.claude/.credentials.json
 
 Paste the entire JSON blob as the value. Docker env files take values literally so no escaping is needed. The refresh token is long-lived — you only need to update this file if you explicitly log out and back in.
 
-**Getting `GITHUB_TOKEN`:** create a Personal Access Token at github.com/settings/tokens with `repo` scope (read + write).
+**Getting `GITHUB_TOKEN`:** create a fine-grained Personal Access Token at github.com/settings/tokens with **Contents** permission set to **Read and write**.
 
 All containers on this host share the same file, so you only do this once per host.
 
