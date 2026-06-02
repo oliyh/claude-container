@@ -18,7 +18,7 @@ services:
       timeout: 10s
       retries: 3
       start_period: 120s
-    restart: "no"
+    restart: unless-stopped
 
 volumes:
   dev-home:
