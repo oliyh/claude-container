@@ -84,4 +84,5 @@ fi
 SESSION_NAME="${SESSION_NAME:-${REPO_NAME}}"
 echo "Starting Claude Code remote-control session: ${SESSION_NAME}"
 
-exec claude --add-dir "$TARGET" --remote-control "$SESSION_NAME"
+cd "$TARGET"
+exec claude --dangerously-skip-permissions --remote-control "$SESSION_NAME"
