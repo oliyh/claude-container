@@ -48,6 +48,13 @@ if [[ ! -f /home/dev/.claude/settings.json ]]; then
   chown -R dev:dev /home/dev/.claude
 fi
 
+# Write OAuth credentials from env var if provided (avoids interactive /login)
+if [[ -n "${CLAUDE_CREDENTIALS:-}" ]]; then
+  mkdir -p /home/dev/.claude
+  printf '%s' "$CLAUDE_CREDENTIALS" > /home/dev/.claude/.credentials.json
+  chown -R dev:dev /home/dev/.claude
+fi
+
 # Clone or update the repo as the dev user
 if [[ -d "$TARGET/.git" ]]; then
   echo "Repo already cloned at $TARGET, pulling latest..."
