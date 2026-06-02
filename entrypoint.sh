@@ -53,7 +53,7 @@ fi
 # required so remote-control sessions can run tests/builds unattended
 # without hanging on a permission request that's awkward to answer from mobile.
 mkdir -p /home/dev/.claude
-printf '{"permissions":{"defaultMode":"bypassPermissions"},"remoteControlAtStartup":true}\n' \
+printf '{"remoteControlAtStartup":true}\n' \
   > /home/dev/.claude/settings.json
 
 # Write OAuth credentials from env var if provided (avoids interactive /login)
