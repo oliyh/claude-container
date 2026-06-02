@@ -1,0 +1,10 @@
+[Unit]
+Description=Periodically refresh the Claude credentials seed
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

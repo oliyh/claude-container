@@ -13,31 +13,66 @@ Set these in Coolify when starting a service:
 | `REPO` | `martian` | Short name → `github.com/oliyh/$REPO`. Also accepts `owner/repo` or a full https URL. |
 | `SESSION_NAME` | `martian` | Name shown in the mobile app (defaults to repo name) |
 
-Shared credentials (`GITHUB_TOKEN`, `CLAUDE_CREDENTIALS`) are loaded from `/data/claude-shared.env` on the host — see setup below.
+Credentials live on the host: a `GITHUB_TOKEN` in `/data/claude-shared.env`, and the Claude seed in `/data/claude-credentials.json` — see setup below.
+
+## How credentials stay fresh
+
+Claude Code logs in with an OAuth credential that has a short-lived access token and a refresh token. A **running** container refreshes its own copy in place (inside its `dev-home` volume), so live sessions stay logged in indefinitely.
+
+The problem is **new** containers. Each repo gets its own container and its own empty volume, so on first start it seeds from the host file `/data/claude-credentials.json`. If that seed is a static snapshot from weeks ago, its refresh token has aged out and the new container hits `/login`.
+
+The fix is a host-side harvester ([`harvest-credentials.sh`](harvest-credentials.sh)): on a timer it scans every container volume for the most recently refreshed `.credentials.json` and copies it over the seed. As long as *some* container has been alive recently, the seed is always fresh, so a brand-new container next week seeds from minutes-old credentials. No action needed from your phone.
+
+> Note: Anthropic Remote Control sessions must use subscription OAuth credentials. The long-lived `claude setup-token` / `CLAUDE_CODE_OAUTH_TOKEN` is explicitly scoped to inference only and **cannot** establish a Remote Control session, so it isn't an option here — hence this harvest approach.
 
 ## Host setup (first time)
 
-SSH into the Coolify host and create a shared credentials file. Note the single quotes escaping the claude json:
+SSH into the Coolify host.
+
+**1. GitHub token** — create a fine-grained PAT at github.com/settings/tokens with **Contents** set to **Read and write**, then:
 
 ```bash
 cat > /data/claude-shared.env << 'EOF'
 GITHUB_TOKEN=ghp_your_token_here
-CLAUDE_CREDENTIALS='{"claudeAiOauth":{"accessToken":"sk-ant-...","refreshToken":"...",...}}'
 EOF
 chmod 600 /data/claude-shared.env
 ```
 
-**Getting `CLAUDE_CREDENTIALS`:** on a machine where you're already logged in to Claude Code, run:
+**2. Claude seed** — on a machine where you're already logged in to Claude Code, copy `~/.claude/.credentials.json` to the host as the seed:
 
 ```bash
-cat ~/.claude/.credentials.json
+# on the host
+install -m 600 /dev/stdin /data/claude-credentials.json   # paste the JSON, then Ctrl-D
 ```
 
-Paste the entire JSON blob as the value. Docker env files take values literally so no escaping is needed. The refresh token is long-lived — you only need to update this file if you explicitly log out and back in.
+The seed only needs to be a *valid, recently-refreshed* credential to bootstrap the first container; after that the harvester keeps it current automatically.
 
-**Getting `GITHUB_TOKEN`:** create a fine-grained Personal Access Token at github.com/settings/tokens with **Contents** permission set to **Read and write**.
+**3. Install the harvester** (from this repo, on the host):
 
-All containers on this host share the same file, so you only do this once per host.
+```bash
+install -m 755 harvest-credentials.sh /usr/local/bin/harvest-credentials.sh
+install -m 644 systemd/claude-harvest.service /etc/systemd/system/
+install -m 644 systemd/claude-harvest.timer   /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now claude-harvest.timer
+```
+
+Check it: `systemctl list-timers claude-harvest.timer` and `journalctl -u claude-harvest.service`. Run it once on demand with `systemctl start claude-harvest.service`.
+
+All containers on this host share these files, so you only do this once per host.
+
+## Break-glass: refreshing the seed manually
+
+If every container has been down long enough that the seed aged out (and the harvester had nothing fresh to copy), re-seed from your phone over SSH:
+
+```bash
+# on the host, in a throwaway dir
+claude            # prints a login URL — open it in your phone browser,
+                  # authorize, paste the code back at the prompt
+install -m 600 ~/.claude/.credentials.json /data/claude-credentials.json
+```
+
+The next container you launch seeds from this, and the harvester takes over again from there.
 
 ## What's in the image
 

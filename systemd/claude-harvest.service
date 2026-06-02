@@ -1,0 +1,8 @@
+[Unit]
+Description=Harvest freshest Claude credentials into the seed file
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/harvest-credentials.sh

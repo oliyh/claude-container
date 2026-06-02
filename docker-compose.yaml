@@ -10,6 +10,8 @@ services:
       - SESSION_NAME=${SESSION_NAME:-}
     volumes:
       - /data/claude-shared.env:/run/claude-shared.env:ro
+      # Seed credentials, kept fresh on the host by harvest-credentials.sh.
+      - /data/claude-credentials.json:/run/claude-credentials.json:ro
       # Persists .claude.json config, dep caches (.m2, .lein, .clojure, .npm)
       - dev-home:/home/dev
     healthcheck:

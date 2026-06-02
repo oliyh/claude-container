@@ -56,10 +56,21 @@ mkdir -p /home/dev/.claude
 printf '{"skipDangerousModePermissionPrompt":true,"remoteControlAtStartup":true}\n' \
   > /home/dev/.claude/settings.json
 
-# Write OAuth credentials from env var if provided (avoids interactive /login)
-if [[ -n "${CLAUDE_CREDENTIALS:-}" ]]; then
+# Seed OAuth credentials only if none exist yet (avoids interactive /login on
+# first run). Prefer the host seed file (kept fresh by harvest-credentials.sh on
+# the host); fall back to the CLAUDE_CREDENTIALS env var for older deployments.
+# On later starts we leave the file untouched: Claude refreshes the access token
+# in place and that fresh copy lives in the dev-home volume — overwriting it with
+# a static seed would undo every refresh, and is also what the harvester reads.
+if [[ ! -f /home/dev/.claude/.credentials.json ]]; then
   mkdir -p /home/dev/.claude
-  printf '%s' "$CLAUDE_CREDENTIALS" > /home/dev/.claude/.credentials.json
+  if [[ -f /run/claude-credentials.json ]]; then
+    cp /run/claude-credentials.json /home/dev/.claude/.credentials.json
+    chmod 600 /home/dev/.claude/.credentials.json
+  elif [[ -n "${CLAUDE_CREDENTIALS:-}" ]]; then
+    printf '%s' "$CLAUDE_CREDENTIALS" > /home/dev/.claude/.credentials.json
+    chmod 600 /home/dev/.claude/.credentials.json
+  fi
 fi
 
 # Configure git identity if provided
