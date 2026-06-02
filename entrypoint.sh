@@ -72,6 +72,9 @@ if [[ -n "${GIT_USER_EMAIL:-}" ]]; then
   gosu dev git config --global user.email "$GIT_USER_EMAIL"
 fi
 
+# Ensure git trusts this directory regardless of volume ownership
+gosu dev git config --global --add safe.directory "$TARGET"
+
 # Clone or update the repo as the dev user
 if [[ -d "$TARGET/.git" ]]; then
   echo "Repo already cloned at $TARGET, pulling latest..."
