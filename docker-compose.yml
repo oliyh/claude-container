@@ -4,7 +4,10 @@ services:
     tty: true
     environment:
       - REPO=${REPO}
-      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITHUB_TOKEN={{project.GITHUB_TOKEN}}
+      - CLAUDE_CREDENTIALS={{project.CLAUDE_CREDENTIALS}}
+      - GIT_USER_NAME=Oliver Hine
+      - GIT_USER_EMAIL=git@oliy.co.uk
       # Optional: name shown in the mobile app (defaults to repo name)
       - SESSION_NAME=${SESSION_NAME:-}
     volumes:

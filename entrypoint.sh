@@ -55,6 +55,14 @@ if [[ -n "${CLAUDE_CREDENTIALS:-}" ]]; then
   chown -R dev:dev /home/dev/.claude
 fi
 
+# Configure git identity if provided
+if [[ -n "${GIT_USER_NAME:-}" ]]; then
+  gosu dev git config --global user.name "$GIT_USER_NAME"
+fi
+if [[ -n "${GIT_USER_EMAIL:-}" ]]; then
+  gosu dev git config --global user.email "$GIT_USER_EMAIL"
+fi
+
 # Clone or update the repo as the dev user
 if [[ -d "$TARGET/.git" ]]; then
   echo "Repo already cloned at $TARGET, pulling latest..."
