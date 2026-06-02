@@ -45,4 +45,6 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 
 USER dev
 WORKDIR /home/dev/workspace
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+  CMD pgrep -f claude
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
