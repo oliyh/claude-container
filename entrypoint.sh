@@ -51,7 +51,7 @@ fi
 # Write OAuth credentials from env var if provided (avoids interactive /login)
 if [[ -n "${CLAUDE_CREDENTIALS:-}" ]]; then
   mkdir -p /home/dev/.claude
-  printf '%s' "$CLAUDE_CREDENTIALS" > /home/dev/.claude/.credentials.json
+  printf '%s' "$CLAUDE_CREDENTIALS" | sed 's/\\"/"/g' > /home/dev/.claude/.credentials.json
   chown -R dev:dev /home/dev/.claude
 fi
 
