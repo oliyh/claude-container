@@ -5,6 +5,15 @@ set -euo pipefail
 #               "oliyh/martian"  →  same
 #               "othername/repo"  →  github.com/othername/repo
 #               full https URL  →  used as-is
+# Load shared credentials from host-mounted env file (Docker daemon resolves
+# this bind mount on the host, bypassing Coolify's containerised Compose CLI)
+if [[ -f /run/claude-shared.env ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  source /run/claude-shared.env
+  set +a
+fi
+
 if [[ -z "${REPO:-}" ]]; then
   echo "ERROR: \$REPO must be set (e.g. REPO=martian or REPO=oliyh/martian)" >&2
   exit 1
@@ -51,7 +60,7 @@ fi
 # Write OAuth credentials from env var if provided (avoids interactive /login)
 if [[ -n "${CLAUDE_CREDENTIALS:-}" ]]; then
   mkdir -p /home/dev/.claude
-  printf '%s' "$CLAUDE_CREDENTIALS" | sed 's/\\"/"/g' > /home/dev/.claude/.credentials.json
+  printf '%s' "$CLAUDE_CREDENTIALS" > /home/dev/.claude/.credentials.json
   chown -R dev:dev /home/dev/.claude
 fi
 

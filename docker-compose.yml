@@ -2,9 +2,6 @@ services:
   claude-dev:
     build: .
     tty: true
-    env_file:
-      - path: /data/claude-shared.env
-        required: false
     environment:
       - REPO=${REPO}
       - GIT_USER_NAME=Oliver Hine
@@ -12,8 +9,8 @@ services:
       # Optional: name shown in the mobile app (defaults to repo name)
       - SESSION_NAME=${SESSION_NAME:-}
     volumes:
-      # Persists OAuth token, .claude.json config, dep caches (.m2, .lein, .clojure, .npm)
-      # First run will print an auth URL to logs — tap it on your phone to authenticate
+      - /data/claude-shared.env:/run/claude-shared.env:ro
+      # Persists .claude.json config, dep caches (.m2, .lein, .clojure, .npm)
       - dev-home:/home/dev
     restart: "no"
 

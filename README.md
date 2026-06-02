@@ -13,16 +13,16 @@ Set these in Coolify when starting a service:
 | `REPO` | `martian` | Short name → `github.com/oliyh/$REPO`. Also accepts `owner/repo` or a full https URL. |
 | `SESSION_NAME` | `martian` | Name shown in the mobile app (defaults to repo name) |
 
-Shared credentials (`GITHUB_TOKEN`, `CLAUDE_CREDENTIALS`) are loaded from a file on the host — see setup below.
+Shared credentials (`GITHUB_TOKEN`, `CLAUDE_CREDENTIALS`) are loaded from `/data/claude-shared.env` on the host — see setup below.
 
 ## Host setup (first time)
 
-SSH into the Coolify host and create a shared credentials file:
+SSH into the Coolify host and create a shared credentials file. Note the single quotes escaping the claude json:
 
 ```bash
 cat > /data/claude-shared.env << 'EOF'
 GITHUB_TOKEN=ghp_your_token_here
-CLAUDE_CREDENTIALS={"claudeAiOauth":{"accessToken":"sk-ant-...","refreshToken":"...",...}}
+CLAUDE_CREDENTIALS='{"claudeAiOauth":{"accessToken":"sk-ant-...","refreshToken":"...",...}}'
 EOF
 chmod 600 /data/claude-shared.env
 ```
