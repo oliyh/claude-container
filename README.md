@@ -11,19 +11,33 @@ Set these in Coolify when starting a service:
 | Variable | Example | Notes |
 |---|---|---|
 | `REPO` | `martian` | Short name → `github.com/oliyh/$REPO`. Also accepts `owner/repo` or a full https URL. |
-| `GITHUB_TOKEN` | `ghp_...` | Only needed for private repos |
 | `SESSION_NAME` | `martian` | Name shown in the mobile app (defaults to repo name) |
 
-The `dev-home` volume persists your OAuth token and dependency caches across sessions.
+Shared credentials (`GITHUB_TOKEN`, `CLAUDE_CREDENTIALS`) are loaded from a file on the host — see setup below.
 
-## First-time auth
+## Host setup (first time)
 
-1. Start the container in Coolify
-2. Connect to the session from the Claude mobile app
-3. Type `/login` — follow the OAuth URL that appears
-4. Done. The token is saved to the volume; subsequent sessions start authenticated.
+SSH into the Coolify host and create a shared credentials file:
 
-**Alternative:** run `claude setup-token` locally once and add `CLAUDE_CODE_OAUTH_TOKEN` as a Coolify secret for fully automatic auth.
+```bash
+cat > /data/claude-shared.env << 'EOF'
+GITHUB_TOKEN=ghp_your_token_here
+CLAUDE_CREDENTIALS={"claudeAiOauth":{"accessToken":"sk-ant-...","refreshToken":"...",...}}
+EOF
+chmod 600 /data/claude-shared.env
+```
+
+**Getting `CLAUDE_CREDENTIALS`:** on a machine where you're already logged in to Claude Code, run:
+
+```bash
+cat ~/.claude/.credentials.json
+```
+
+Paste the entire JSON blob as the value. Docker env files take values literally so no escaping is needed. The refresh token is long-lived — you only need to update this file if you explicitly log out and back in.
+
+**Getting `GITHUB_TOKEN`:** create a Personal Access Token at github.com/settings/tokens with `repo` scope (read + write).
+
+All containers on this host share the same file, so you only do this once per host.
 
 ## What's in the image
 
