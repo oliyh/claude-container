@@ -11,7 +11,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     gnupg \
     rlwrap \
-    gosu \
     bsdutils \
     procps \
     && rm -rf /var/lib/apt/lists/*
@@ -44,5 +43,6 @@ RUN useradd -m -s /bin/bash dev
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
+USER dev
 WORKDIR /home/dev/workspace
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
