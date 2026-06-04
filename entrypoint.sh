@@ -56,21 +56,40 @@ mkdir -p /home/dev/.claude
 printf '{"skipDangerousModePermissionPrompt":true,"remoteControlAtStartup":true}\n' \
   > /home/dev/.claude/settings.json
 
-# Seed OAuth credentials only if none exist yet (avoids interactive /login on
-# first run). Prefer the host seed file (kept fresh by harvest-credentials.sh on
-# the host); fall back to the CLAUDE_CREDENTIALS env var for older deployments.
-# On later starts we leave the file untouched: Claude refreshes the access token
-# in place and that fresh copy lives in the dev-home volume — overwriting it with
-# a static seed would undo every refresh, and is also what the harvester reads.
-if [[ ! -f /home/dev/.claude/.credentials.json ]]; then
-  mkdir -p /home/dev/.claude
-  if [[ -f /run/claude-credentials.json ]]; then
-    cp /run/claude-credentials.json /home/dev/.claude/.credentials.json
-    chmod 600 /home/dev/.claude/.credentials.json
-  elif [[ -n "${CLAUDE_CREDENTIALS:-}" ]]; then
-    printf '%s' "$CLAUDE_CREDENTIALS" > /home/dev/.claude/.credentials.json
-    chmod 600 /home/dev/.claude/.credentials.json
+# Seed OAuth credentials so the session starts logged in without an interactive
+# /login. Two copies drift over time: the host seed (kept fresh by
+# harvest-credentials.sh from whichever container refreshed most recently) and
+# the in-volume copy (refreshed in place by a running Claude). On every start we
+# keep whichever is fresher, measured by the access-token expiry inside the file
+# rather than mtime — the harvester rewrites the seed's mtime on every copy, so
+# mtime tracks harvest time, not token age. This recovers a redeployed container
+# whose volume copy went stale (host seed wins) without clobbering a still-warm
+# container's newer in-place refresh (volume copy wins). Falls back to the
+# CLAUDE_CREDENTIALS env var for older deployments with no seed file.
+CRED=/home/dev/.claude/.credentials.json
+SEED=/run/claude-credentials.json
+mkdir -p /home/dev/.claude
+
+# Access-token expiry (epoch ms) from a creds file, or 0 if missing/unreadable.
+cred_expiry() {
+  local f=$1 e
+  [[ -r "$f" ]] || { echo 0; return; }
+  e=$(grep -o '"expiresAt":[0-9]*' "$f" 2>/dev/null | head -1 | grep -o '[0-9]*')
+  echo "${e:-0}"
+}
+
+if [[ -r "$SEED" ]] && grep -q claudeAiOauth "$SEED" 2>/dev/null; then
+  if [[ ! -f "$CRED" ]] || (( $(cred_expiry "$SEED") > $(cred_expiry "$CRED") )); then
+    cp "$SEED" "$CRED"
+    chmod 600 "$CRED"
+    echo "entrypoint: seeded credentials from host seed (fresher than volume copy)"
+  else
+    echo "entrypoint: kept in-volume credentials (as fresh as or fresher than seed)"
   fi
+elif [[ ! -f "$CRED" && -n "${CLAUDE_CREDENTIALS:-}" ]]; then
+  printf '%s' "$CLAUDE_CREDENTIALS" > "$CRED"
+  chmod 600 "$CRED"
+  echo "entrypoint: seeded credentials from CLAUDE_CREDENTIALS env"
 fi
 
 # Configure git identity if provided
