@@ -46,6 +46,12 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o 
     && apt-get install -y gh \
     && rm -rf /var/lib/apt/lists/*
 
+# clj-kondo
+RUN curl -sLO https://raw.githubusercontent.com/clj-kondo/clj-kondo/master/script/install-clj-kondo \
+    && chmod +x install-clj-kondo \
+    && ./install-clj-kondo --dir /usr/local/bin \
+    && rm install-clj-kondo
+
 # Node.js 20 LTS
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
