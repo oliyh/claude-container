@@ -1,4 +1,31 @@
 services:
+  # Dedicated Docker daemon for the leadout test workflow (`make
+  # datafield-*-docker`). It is deliberately ISOLATED from the host daemon:
+  # claude-dev talks to this over TCP via DOCKER_HOST and has no access to
+  # /var/run/docker.sock. So even a crafted `docker create -v /:/host` only ever
+  # sees this throwaway daemon — never the host filesystem or the Coolify /
+  # Postgres / other containers running on the host. `privileged` is required to
+  # run a nested daemon, but it is confined to this one sidecar.
+  leadout-dind:
+    image: docker:27-dind
+    privileged: true
+    environment:
+      # Plaintext daemon on 2375, reachable only on the internal compose
+      # network (no `ports:` mapping). TLS is unnecessary inside that boundary.
+      - DOCKER_TLS_CERTDIR=
+    command: ["--tls=false"]
+    volumes:
+      # Persist image layers so the Garmin SDK download in datafield/Dockerfile
+      # is cached across restarts instead of re-fetched on every build.
+      - leadout-dind-data:/var/lib/docker
+    healthcheck:
+      test: ["CMD", "docker", "info"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
   claude-dev:
     build: .
     tty: true
@@ -8,15 +35,17 @@ services:
       - GIT_USER_EMAIL=git@oliy.co.uk
       # Optional: name shown in the mobile app (defaults to repo name)
       - SESSION_NAME=${SESSION_NAME:-}
+      # Point the docker CLI at the isolated sidecar daemon, not the host.
+      - DOCKER_HOST=tcp://leadout-dind:2375
+    depends_on:
+      leadout-dind:
+        condition: service_healthy
     volumes:
       - /data/claude-shared.env:/run/claude-shared.env:ro
       # Seed credentials, kept fresh on the host by harvest-credentials.sh.
       - /data/claude-credentials.json:/run/claude-credentials.json:ro
       # Persists .claude.json config, dep caches (.m2, .lein, .clojure, .npm)
       - dev-home:/home/dev
-      - /var/run/docker.sock:/var/run/docker.sock
-    group_add:
-      - "998"
     healthcheck:
       test: ["CMD-SHELL", "pgrep -f claude"]
       interval: 30s
@@ -27,3 +56,4 @@ services:
 
 volumes:
   dev-home:
+  leadout-dind-data:

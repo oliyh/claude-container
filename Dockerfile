@@ -30,7 +30,8 @@ RUN curl -L https://github.com/clojure/brew-install/releases/latest/download/lin
 RUN curl -fsSL https://raw.githubusercontent.com/technomancy/leiningen/stable/bin/lein -o /usr/local/bin/lein \
     && chmod +x /usr/local/bin/lein
 
-# Docker CLI (socket-mounted from host — no daemon needed)
+# Docker CLI — talks to the isolated leadout-dind daemon via DOCKER_HOST
+# (see docker-compose.yaml); the host socket is intentionally not mounted.
 RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc \
     && chmod a+r /etc/apt/keyrings/docker.asc \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable" > /etc/apt/sources.list.d/docker.list \
