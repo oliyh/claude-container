@@ -44,6 +44,6 @@ fi
 # Atomic replace so a half-written seed is never observed by a starting container.
 tmp=$(mktemp /data/.claude-credentials.XXXXXX)
 cp "$newest" "$tmp"
-chmod 600 "$tmp"
+chmod 644 "$tmp"
 mv -f "$tmp" "$SEED"
 echo "harvest: updated seed from $newest (mtime $newest_mtime)"
