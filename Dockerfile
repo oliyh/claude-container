@@ -61,6 +61,17 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 # Claude Code
 RUN npm install -g @anthropic-ai/claude-code
 
+# Playwright + Chromium for browser automation. Browsers are installed to a
+# system path rather than the default ~/.cache, because the dev-home volume
+# shadows /home/dev at runtime and would hide anything baked in there. The env
+# var is set globally so the dev user (and any project-local Playwright) finds
+# them. --with-deps pulls in the OS libraries Chromium needs (fonts, GTK/X libs,
+# etc.) via apt, so we clean the apt lists afterwards.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN npm install -g playwright \
+    && playwright install --with-deps chromium \
+    && rm -rf /var/lib/apt/lists/*
+
 # Non-root user for running Claude (--dangerously-skip-permissions blocks root)
 RUN useradd -m -s /bin/bash dev
 
