@@ -76,7 +76,7 @@ Sessions restart automatically with the daemon. Claude is launched as `claude --
 
 ## Security notes
 
-**Perimeter.** Only `ALLOWED_EMAIL` gets past Google sign-in. The hub additionally rejects requests that lack that email or don't come from the auth-proxy's IP, and it doesn't even listen on the interface facing the nested daemon, so session containers can't connect to it. State-changing calls need `application/json` and a same-origin `Origin`; the UI never uses `innerHTML` and sets a strict CSP.
+**Perimeter.** Only `ALLOWED_EMAIL` gets past Google sign-in. The hub additionally rejects requests that lack that email or don't come from the auth-proxy's IP, and it listens only on a private network shared with the auth-proxy (which the nested daemon is not on), so session containers can't connect to it. State-changing calls need `application/json` and a same-origin `Origin`; the UI never uses `innerHTML` and sets a strict CSP.
 
 **What a session can do.** Treat every session as untrusted: it runs with `--dangerously-skip-permissions` on whatever a repo or a prompt tells it. A session:
 - can read and write its own project and home, and can read **the shared Claude login** (all sessions share it by design — a compromised session can steal your subscription login);

@@ -15,7 +15,10 @@ services:
       - OAUTH2_PROXY_COOKIE_SECRET=${COOKIE_SECRET:?32 random chars, e.g. openssl rand -hex 16}
       - OAUTH2_PROXY_REDIRECT_URL=${PUBLIC_URL:?https://your.domain}/oauth2/callback
       - OAUTH2_PROXY_AUTHENTICATED_EMAILS_FILE=/tmp/emails
-      - OAUTH2_PROXY_UPSTREAMS=http://hub:8080
+      # The hub's alias on the private `front` network. A bare `hub` can resolve
+      # to its address on another network (Coolify adds its own), where the hub
+      # deliberately does not listen.
+      - OAUTH2_PROXY_UPSTREAMS=http://hub-front:8080
       - OAUTH2_PROXY_HTTP_ADDRESS=0.0.0.0:4180
       - OAUTH2_PROXY_REVERSE_PROXY=true
       - OAUTH2_PROXY_COOKIE_SECURE=true
@@ -25,6 +28,11 @@ services:
       - OAUTH2_PROXY_SKIP_PROVIDER_BUTTON=true
     expose:
       - "4180"
+    networks:
+      default: {}
+      front:
+        aliases:
+          - auth-proxy-front
     depends_on:
       - hub
     restart: unless-stopped
@@ -35,7 +43,9 @@ services:
       dockerfile: hub/Dockerfile
     environment:
       - ALLOWED_EMAIL=${ALLOWED_EMAIL:?}
-      - TRUSTED_PROXY_HOST=auth-proxy
+      # Aliases that exist only on `front`, so they resolve to front addresses.
+      - TRUSTED_PROXY_HOST=auth-proxy-front
+      - LISTEN_HOST=hub-front
       # Optional: lets you browse/clone private repos and lets sessions push.
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_OWNER=${GITHUB_OWNER:-oliyh}
@@ -55,8 +65,11 @@ services:
       - hub-data:/data
       - dind-certs:/dind-certs:ro
     networks:
-      - default
-      - internal
+      default: {}
+      internal: {}
+      front:
+        aliases:
+          - hub-front
     depends_on:
       dind:
         condition: service_healthy
@@ -102,6 +115,9 @@ services:
 
 networks:
   internal: {}
+  # Only auth-proxy and hub. The hub listens on nothing else, so neither the
+  # dind side nor any network Coolify attaches can reach it.
+  front: {}
 
 volumes:
   hub-data:

@@ -41,7 +41,8 @@ IMAGE = "claude-hub-session:latest"
 SESSION_CONTEXT = "/app/session"
 
 ALLOWED_EMAIL = os.environ.get("ALLOWED_EMAIL", "").strip().lower()
-TRUSTED_PROXY_HOST = os.environ.get("TRUSTED_PROXY_HOST", "auth-proxy")
+TRUSTED_PROXY_HOST = os.environ.get("TRUSTED_PROXY_HOST", "auth-proxy-front")
+LISTEN_HOST = os.environ.get("LISTEN_HOST", "hub-front")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 GITHUB_OWNER = os.environ.get("GITHUB_OWNER", "oliyh")
 # Cloning runs a project's own hooks/MCP config under skip-permissions with the
@@ -750,30 +751,21 @@ def project_keys(name):
 # ---------------------------------------------------------------- main
 
 def listen_addresses():
-    """Listen on every interface except the one facing dind. Sessions reach the
-    compose network through dind, so they must not even be able to connect to
-    the hub; the source-IP check in guard() is the second layer."""
-    ips = {}
-    for _, ifname in socket.if_nameindex():
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            try:
-                packed = fcntl.ioctl(s.fileno(), 0x8915, struct.pack("256s", ifname[:15].encode()))
-                ips[ifname] = socket.inet_ntoa(packed[20:24])
-            except OSError:
-                pass
-    try:
-        dind_ip = socket.gethostbyname("dind")
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.connect((dind_ip, 9))
-            facing_dind = s.getsockname()[0]
-    except OSError:
-        facing_dind = None
-    addrs = [ip for name, ip in ips.items() if name != "lo" and ip != facing_dind]
-    if not addrs:
-        print("WARNING: could not separate the dind-facing interface; listening on all", flush=True)
-        return ["0.0.0.0"]
-    print(f"listening on {addrs} (not on dind-facing {facing_dind})", flush=True)
-    return addrs
+    """Listen only on the private network shared with the auth-proxy (and on
+    loopback, for the healthcheck). Sessions reach the compose networks through
+    dind, which is not on that network, so they cannot even connect to the hub;
+    the source-IP check in guard() is the second layer. Fails closed: if the
+    address cannot be resolved, exit and let the restart policy retry."""
+    for _ in range(30):
+        try:
+            front = socket.gethostbyname(LISTEN_HOST)
+            break
+        except OSError:
+            time.sleep(1)
+    else:
+        raise SystemExit(f"could not resolve {LISTEN_HOST}; refusing to listen elsewhere")
+    print(f"listening on {front} ({LISTEN_HOST}) and 127.0.0.1", flush=True)
+    return [front, "127.0.0.1"]
 
 
 def main():
