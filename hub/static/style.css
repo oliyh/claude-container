@@ -1,0 +1,42 @@
+:root {
+  --bg: #f6f5f1; --fg: #1f1e1b; --muted: #6b6860; --card: #fff; --line: #dedbd2;
+  --accent: #c15f3c; --ok: #2f7d4f; --bad: #b3372f; --warn: #a8741a;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1b1a18; --fg: #ecebe6; --muted: #9a978e; --card: #26241f; --line: #3a3832;
+    --accent: #e0805c; --ok: #5fb583; --bad: #e0675e; --warn: #d9a441;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.45 system-ui, sans-serif; }
+header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+  padding: 16px; max-width: 760px; margin: 0 auto; }
+h1 { font-size: 20px; margin: 0; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 8px; }
+#who { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; }
+main { max-width: 760px; margin: 0 auto; padding: 0 16px 48px; display: grid; gap: 16px; }
+section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+section:empty { display: none; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.row + .row, .row + p, p + .row, .row + pre, pre + .row { margin-top: 10px; }
+.grow { flex: 1 1 160px; }
+.spread { justify-content: space-between; }
+input[type=text] { font: inherit; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--bg); color: var(--fg); min-width: 0; }
+button { font: inherit; padding: 9px 14px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--card); color: var(--fg); cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.danger { color: var(--bad); }
+button:disabled { opacity: .5; cursor: default; }
+label { color: var(--muted); font-size: 14px; display: inline-flex; gap: 6px; align-items: center; }
+p { margin: 0; }
+.muted { color: var(--muted); font-size: 14px; }
+.pill { font-size: 12px; padding: 2px 9px; border-radius: 99px; border: 1px solid currentColor; }
+.ok { color: var(--ok); } .bad { color: var(--bad); } .warn { color: var(--warn); }
+.project + .project { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 14px; }
+.name { font-weight: 600; word-break: break-all; }
+pre { background: #111; color: #ddd; padding: 10px; border-radius: 8px; overflow: auto; max-height: 340px;
+  font: 12px/1.35 ui-monospace, monospace; margin: 0; white-space: pre-wrap; word-break: break-all; }
+a { color: var(--accent); word-break: break-all; }
+#banner { background: var(--bad); color: #fff; padding: 10px 14px; border-radius: 10px; }

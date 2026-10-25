@@ -1,23 +1,97 @@
 services:
-  # Dedicated Docker daemon for the leadout test workflow (`make
-  # datafield-*-docker`). It is deliberately ISOLATED from the host daemon:
-  # claude-dev talks to this over TCP via DOCKER_HOST and has no access to
-  # /var/run/docker.sock. So even a crafted `docker create -v /:/host` only ever
-  # sees this throwaway daemon — never the host filesystem or the Coolify /
-  # Postgres / other containers running on the host. `privileged` is required to
-  # run a nested daemon, but it is confined to this one sidecar.
-  leadout-dind:
+  # Public entry point: Google sign-in in front of the hub. Only this service
+  # gets a domain in Coolify (port 4180). Only ALLOWED_EMAIL is let through.
+  auth-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.13.0-alpine
+    entrypoint: ["/bin/sh", "-c"]
+    # Allow-list file rather than an email *domain*: a domain match would let in
+    # anyone on that domain, and "*" would let in every Google account.
+    command: ['echo "$$ALLOWED_EMAIL" > /tmp/emails && exec /bin/oauth2-proxy']
+    environment:
+      - ALLOWED_EMAIL=${ALLOWED_EMAIL:?your Google account email}
+      - OAUTH2_PROXY_PROVIDER=google
+      - OAUTH2_PROXY_CLIENT_ID=${GOOGLE_CLIENT_ID:?}
+      - OAUTH2_PROXY_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:?}
+      - OAUTH2_PROXY_COOKIE_SECRET=${COOKIE_SECRET:?32 random chars, e.g. openssl rand -hex 16}
+      - OAUTH2_PROXY_REDIRECT_URL=${PUBLIC_URL:?https://your.domain}/oauth2/callback
+      - OAUTH2_PROXY_AUTHENTICATED_EMAILS_FILE=/tmp/emails
+      - OAUTH2_PROXY_UPSTREAMS=http://hub:8080
+      - OAUTH2_PROXY_HTTP_ADDRESS=0.0.0.0:4180
+      - OAUTH2_PROXY_REVERSE_PROXY=true
+      - OAUTH2_PROXY_COOKIE_SECURE=true
+      - OAUTH2_PROXY_COOKIE_SAMESITE=lax
+      - OAUTH2_PROXY_COOKIE_EXPIRE=24h
+      - OAUTH2_PROXY_COOKIE_REFRESH=1h
+      - OAUTH2_PROXY_SKIP_PROVIDER_BUTTON=true
+    expose:
+      - "4180"
+    depends_on:
+      - hub
+    restart: unless-stopped
+
+  hub:
+    build:
+      context: .
+      dockerfile: hub/Dockerfile
+    environment:
+      - ALLOWED_EMAIL=${ALLOWED_EMAIL:?}
+      - TRUSTED_PROXY_HOST=auth-proxy
+      # Optional: lets you browse/clone private repos and lets sessions push.
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITHUB_OWNER=${GITHUB_OWNER:-oliyh}
+      # Comma-separated GitHub owners the UI may clone from (default: GITHUB_OWNER).
+      # A cloned repo's own hooks/MCP config run in a session that holds the token.
+      - ALLOWED_OWNERS=${ALLOWED_OWNERS:-}
+      # Optional per-session limits, e.g. 8g and 4
+      - SESSION_MEMORY=${SESSION_MEMORY:-}
+      - SESSION_CPUS=${SESSION_CPUS:-}
+      - GIT_USER_NAME=${GIT_USER_NAME:-Oliver Hine}
+      - GIT_USER_EMAIL=${GIT_USER_EMAIL:-git@oliy.co.uk}
+      # The nested daemon, over mutual TLS. The host Docker socket is never mounted.
+      - DOCKER_HOST=tcp://dind:2376
+      - DOCKER_TLS_VERIFY=1
+      - DOCKER_CERT_PATH=/data/hub/docker-certs
+    volumes:
+      - hub-data:/data
+      - dind-certs:/dind-certs:ro
+    networks:
+      - default
+      - internal
+    depends_on:
+      dind:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # Nested Docker daemon that runs the session containers. It is deliberately
+  # ISOLATED from the host daemon: nothing here can reach /var/run/docker.sock
+  # on the host, so even `docker run -v /:/host` inside only sees this throwaway
+  # daemon's filesystem. NOTE: that only holds for sessions WITHOUT Docker
+  # access. `privileged` gives this container the host's devices, so anyone who
+  # can drive this daemon (the hub, or a session started with Docker access) can
+  # reach host root. It sits on its own network, but that network still has
+  # outbound access (it is not `internal: true`) because builds need the internet.
+  dind:
     image: docker:27-dind
     privileged: true
     environment:
-      # Plaintext daemon on 2375, reachable only on the internal compose
-      # network (no `ports:` mapping). TLS is unnecessary inside that boundary.
-      - DOCKER_TLS_CERTDIR=
-    command: ["--tls=false"]
+      # TLS on (port 2376, client certs required): session containers can route
+      # to this daemon, but without the client certs they cannot use it.
+      - DOCKER_TLS_CERTDIR=/certs
+      - DOCKER_TLS_SAN=DNS:dind,DNS:host.docker.internal
     volumes:
-      # Persist image layers so the Garmin SDK download in datafield/Dockerfile
-      # is cached across restarts instead of re-fetched on every build.
-      - leadout-dind-data:/var/lib/docker
+      - dind-data:/var/lib/docker
+      - dind-certs:/certs
+      # The same volume the hub sees at /data: session bind-mounts such as
+      # /data/projects/foo resolve against THIS daemon's filesystem.
+      - hub-data:/data
+    networks:
+      - internal
     healthcheck:
       test: ["CMD", "docker", "info"]
       interval: 10s
@@ -26,34 +100,10 @@ services:
       start_period: 30s
     restart: unless-stopped
 
-  claude-dev:
-    build: .
-    tty: true
-    environment:
-      - REPO=${REPO}
-      - GIT_USER_NAME=Oliver Hine
-      - GIT_USER_EMAIL=git@oliy.co.uk
-      # Optional: name shown in the mobile app (defaults to repo name)
-      - SESSION_NAME=${SESSION_NAME:-}
-      # Point the docker CLI at the isolated sidecar daemon, not the host.
-      - DOCKER_HOST=tcp://leadout-dind:2375
-    depends_on:
-      leadout-dind:
-        condition: service_healthy
-    volumes:
-      - /data/claude-shared.env:/run/claude-shared.env:ro
-      # Seed credentials, kept fresh on the host by harvest-credentials.sh.
-      - /data/claude-credentials.json:/run/claude-credentials.json:ro
-      # Persists .claude.json config, dep caches (.m2, .lein, .clojure, .npm)
-      - dev-home:/home/dev
-    healthcheck:
-      test: ["CMD-SHELL", "pgrep -f claude"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 120s
-    restart: unless-stopped
+networks:
+  internal: {}
 
 volumes:
-  dev-home:
-  leadout-dind-data:
+  hub-data:
+  dind-data:
+  dind-certs:
