@@ -141,9 +141,7 @@ function renderProject(p) {
       h("button", { disabled: img.building, onclick: () => act(() => api(`/api/projects/${p.name}/image/build`, {})) }, img.ready ? "Rebuild image" : "Build image")));
     if (img.error) el.append(h("p", { class: "bad" }, img.error));
     if (img.building || img.error) {
-      const pre = h("pre", { onscroll: (e) => buildLogScroll.set(p.name, e.target.scrollTop) }, (img.log || []).join("\n"));
-      pre.scrollTop = buildLogScroll.has(p.name) ? buildLogScroll.get(p.name) : pre.scrollHeight;
-      el.append(pre);
+      el.append(h("pre", { "data-buildlog": p.name, onscroll: (e) => buildLogScroll.set(p.name, e.target.scrollTop) }, (img.log || []).join("\n")));
     }
   }
 
@@ -219,6 +217,17 @@ function screenPanel(name) {
   );
 }
 
+// Build-log <pre>s are recreated from scratch by the periodic full re-render.
+// Setting scrollTop at creation is a no-op (a detached node has no scrollable
+// box yet), so this reapplies it once the element is actually in the document —
+// same reason pollScreens reapplies screenScroll after rebuilding the DOM.
+function restoreBuildLogScroll() {
+  for (const pre of document.querySelectorAll("pre[data-buildlog]")) {
+    const key = pre.dataset.buildlog;
+    pre.scrollTop = buildLogScroll.has(key) ? buildLogScroll.get(key) : pre.scrollHeight;
+  }
+}
+
 async function pollScreens() {
   for (const name of openScreens) {
     const pre = document.getElementById(`screen-${name}`);
@@ -283,9 +292,7 @@ function renderImage() {
     h("button", { disabled: image.building, onclick: () => act(() => api("/api/image/build", {})) }, image.ready ? "Rebuild (update Claude Code)" : "Build")));
   if (image.error) sec.append(h("p", { class: "bad" }, image.error));
   if (image.building || image.error) {
-    const pre = h("pre", { onscroll: (e) => buildLogScroll.set("__image__", e.target.scrollTop) }, image.log.join("\n"));
-    pre.scrollTop = buildLogScroll.has("__image__") ? buildLogScroll.get("__image__") : pre.scrollHeight;
-    sec.append(pre);
+    sec.append(h("pre", { "data-buildlog": "__image__", onscroll: (e) => buildLogScroll.set("__image__", e.target.scrollTop) }, image.log.join("\n")));
   }
 }
 
@@ -298,6 +305,7 @@ function render() {
   renderProjects();
   renderAdd();
   renderImage();
+  restoreBuildLogScroll(); // renderProjects/renderImage just recreated these <pre>s
   pollScreens(); // render() rebuilt the panels; refill them straight away
 }
 
