@@ -579,13 +579,13 @@ def list_sessions():
     return out
 
 
-def start_session(name, docker_access):
+def start_session(name, docker_access, use_devcontainer=True):
     valid_name(name)
     if not (PROJECTS / name / ".git").exists():
         raise ApiError("project is not cloned")
     if not auth_status().get("loggedIn"):
         raise ApiError("log in to Claude first")
-    dc = project_devcontainer(name)
+    dc = project_devcontainer(name) if use_devcontainer else None
     if dc:
         session_image = project_image_tag(name)
         if not get_project_build(name).snapshot()["ready"]:
@@ -838,7 +838,7 @@ def project_image_build(name):
 @app.post("/api/projects/<name>/start")
 def project_start(name):
     body = request.get_json(silent=True) or {}
-    start_session(name, bool(body.get("docker")))
+    start_session(name, bool(body.get("docker")), body.get("use_devcontainer", True))
     return jsonify(ok=True)
 
 

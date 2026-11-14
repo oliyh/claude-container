@@ -26,12 +26,16 @@ async function api(path, body) {
 const $ = (id) => document.getElementById(id);
 let state = null;
 const openScreens = new Set();   // projects whose screen panel is open
+const screenScroll = new Map();  // project -> last scrollTop, survives the periodic full re-render
 const dockerChoice = {};         // project -> checkbox state, survives re-render
 let busy = false;                // pause polling re-render while the user is typing
 
 function banner(msg) {
   $("banner").hidden = !msg;
   $("banner").textContent = msg || "";
+  // The banner sits at the top of the page; without this, an error raised by
+  // a button far down the page (e.g. a project card) is invisible on mobile.
+  if (msg) $("banner").scrollIntoView({ block: "nearest" });
 }
 
 async function act(fn) {
@@ -123,9 +127,13 @@ function renderProject(p) {
   }
 
   el.append(h("div", { class: "row" },
-    h("button", { class: "primary", onclick: () => act(() => api(`/api/projects/${p.name}/start`, { docker: dockerBox.checked })) }, p.session ? "Restart" : "Start"),
+    h("button", { class: "primary", onclick: () => act(() => api(`/api/projects/${p.name}/start`, { docker: dockerBox.checked, use_devcontainer: true })) }, p.session ? "Restart" : "Start"),
+    // Backup path: run the shared claude-container image even though this project
+    // has its own devcontainer — useful when the devcontainer image won't build.
+    p.devcontainer ? h("button", { title: "Start using the shared claude-container image instead of this project's devcontainer",
+      onclick: () => act(() => api(`/api/projects/${p.name}/start`, { docker: dockerBox.checked, use_devcontainer: false })) }, "Start (base image)") : null,
     p.session ? h("button", { class: "danger", onclick: () => act(() => api(`/api/projects/${p.name}/stop`, {})) }, "Stop") : null,
-    running ? h("button", { onclick: () => { openScreens.has(p.name) ? openScreens.delete(p.name) : openScreens.add(p.name); renderProjects(); pollScreens(); } }, openScreens.has(p.name) ? "Hide screen" : "Screen") : null,
+    running ? h("button", { onclick: () => { if (openScreens.has(p.name)) { openScreens.delete(p.name); screenScroll.delete(p.name); } else openScreens.add(p.name); renderProjects(); pollScreens(); } }, openScreens.has(p.name) ? "Hide screen" : "Screen") : null,
     h("label", { title: "Lets the session start arbitrary containers on the nested daemon, which is effectively root on this server" }, dockerBox, "Docker access (root-equivalent)"),
     h("button", { class: "danger", onclick: () => act(() => deleteProject(p.name)) }, "Delete"),
   ));
@@ -141,6 +149,7 @@ async function deleteProject(name) {
     : `Delete "${name}"? Everything is synced to git, so nothing will be lost.`;
   if (!confirm(msg)) return;
   openScreens.delete(name);
+  screenScroll.delete(name);
   await api(`/api/projects/${name}/delete`, { force: warnings.length > 0 });
 }
 
@@ -152,7 +161,7 @@ function screenPanel(name) {
     if (e.key === "Enter" && input.value) { send({ text: input.value }).then(() => send({ key: "Enter" })); input.value = ""; }
   });
   return h("div", null,
-    h("pre", { id: `screen-${name}` }, "loading…"),
+    h("pre", { id: `screen-${name}`, onscroll: (e) => screenScroll.set(name, e.target.scrollTop) }, "loading…"),
     h("div", { class: "row" }, input,
       h("button", { onclick: () => { if (input.value) { send({ text: input.value }).then(() => send({ key: "Enter" })); input.value = ""; } } }, "Send")),
     h("div", { class: "row" }, key("Enter"), key("Escape", "Esc"), key("Up", "↑"), key("Down", "↓"), key("Tab"), key("C-c", "Ctrl-C")),
@@ -165,7 +174,9 @@ async function pollScreens() {
     if (!pre) continue;
     try { pre.textContent = (await api(`/api/projects/${name}/screen`)).screen || "(empty)"; }
     catch (e) { pre.textContent = e.message; }
-    pre.scrollTop = pre.scrollHeight;
+    // The periodic full re-render recreates this <pre> from scratch, which would
+    // otherwise reset a manually-scrolled position back to the top every cycle.
+    pre.scrollTop = screenScroll.has(name) ? screenScroll.get(name) : pre.scrollHeight;
   }
 }
 
