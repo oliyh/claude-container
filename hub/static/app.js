@@ -30,6 +30,8 @@ const screenScroll = new Map();  // project -> last scrollTop, survives the peri
 const dockerChoice = {};         // project -> checkbox state, survives re-render
 const openSessions = new Set();  // projects whose resume panel is open
 const sessionsCache = new Map(); // project -> sessions array, fetched lazily when the panel opens
+const buildLogScroll = new Map(); // project (or "__image__") -> last scrollTop, survives the periodic full re-render
+const screenContent = new Map(); // project -> last screen text, so a rebuild doesn't flash blank while the next fetch is in flight
 let busy = false;                // pause polling re-render while the user is typing
 
 function timeAgo(epochSeconds) {
@@ -138,7 +140,11 @@ function renderProject(p) {
       h("span", null, "devcontainer: ", pill),
       h("button", { disabled: img.building, onclick: () => act(() => api(`/api/projects/${p.name}/image/build`, {})) }, img.ready ? "Rebuild image" : "Build image")));
     if (img.error) el.append(h("p", { class: "bad" }, img.error));
-    if (img.building || img.error) el.append(h("pre", null, (img.log || []).join("\n")));
+    if (img.building || img.error) {
+      const pre = h("pre", { onscroll: (e) => buildLogScroll.set(p.name, e.target.scrollTop) }, (img.log || []).join("\n"));
+      pre.scrollTop = buildLogScroll.has(p.name) ? buildLogScroll.get(p.name) : pre.scrollHeight;
+      el.append(pre);
+    }
   }
 
   el.append(h("div", { class: "row" },
@@ -188,6 +194,8 @@ async function deleteProject(name) {
   if (!confirm(msg)) return;
   openScreens.delete(name);
   screenScroll.delete(name);
+  screenContent.delete(name);
+  buildLogScroll.delete(name);
   await api(`/api/projects/${name}/delete`, { force: warnings.length > 0 });
 }
 
@@ -198,8 +206,13 @@ function screenPanel(name) {
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && input.value) { send({ text: input.value }).then(() => send({ key: "Enter" })); input.value = ""; }
   });
+  const pre = h("pre", { id: `screen-${name}`, onscroll: (e) => screenScroll.set(name, e.target.scrollTop) }, screenContent.get(name) || "loading…");
+  // The periodic full re-render recreates this <pre> from scratch; seed it with
+  // the last-known content and scroll position so that doesn't flash blank/top
+  // while the next fetch below is in flight.
+  pre.scrollTop = screenScroll.has(name) ? screenScroll.get(name) : pre.scrollHeight;
   return h("div", null,
-    h("pre", { id: `screen-${name}`, onscroll: (e) => screenScroll.set(name, e.target.scrollTop) }, "loading…"),
+    pre,
     h("div", { class: "row" }, input,
       h("button", { onclick: () => { if (input.value) { send({ text: input.value }).then(() => send({ key: "Enter" })); input.value = ""; } } }, "Send")),
     h("div", { class: "row" }, key("Enter"), key("Escape", "Esc"), key("Up", "↑"), key("Down", "↓"), key("Tab"), key("C-c", "Ctrl-C")),
@@ -210,18 +223,23 @@ async function pollScreens() {
   for (const name of openScreens) {
     const pre = document.getElementById(`screen-${name}`);
     if (!pre) continue;
-    try { pre.textContent = (await api(`/api/projects/${name}/screen`)).screen || "(empty)"; }
-    catch (e) { pre.textContent = e.message; }
-    // The periodic full re-render recreates this <pre> from scratch, which would
-    // otherwise reset a manually-scrolled position back to the top every cycle.
+    try {
+      const text = (await api(`/api/projects/${name}/screen`)).screen || "(empty)";
+      screenContent.set(name, text);
+      pre.textContent = text;
+    } catch (e) { pre.textContent = e.message; }
     pre.scrollTop = screenScroll.has(name) ? screenScroll.get(name) : pre.scrollHeight;
   }
 }
 
 function renderProjects() {
   const sec = $("projects");
-  if (document.activeElement && sec.contains(document.activeElement) && document.activeElement.tagName === "INPUT"
-      && document.activeElement.type === "text") return;
+  const active = document.activeElement;
+  // Don't rebuild while the user is typing, or while a <select> is focused —
+  // that's also true while its native dropdown is open, and rebuilding tears
+  // the element down, which closes it.
+  if (active && sec.contains(active)
+      && ((active.tagName === "INPUT" && active.type === "text") || active.tagName === "SELECT")) return;
   sec.replaceChildren(h("h2", null, "Projects"));
   if (!state.projects.length) sec.append(h("p", { class: "muted" }, "No projects yet — add one below."));
   for (const p of state.projects) sec.append(renderProject(p));
@@ -264,7 +282,11 @@ function renderImage() {
   sec.append(h("div", { class: "row spread" }, pill,
     h("button", { disabled: image.building, onclick: () => act(() => api("/api/image/build", {})) }, image.ready ? "Rebuild (update Claude Code)" : "Build")));
   if (image.error) sec.append(h("p", { class: "bad" }, image.error));
-  if (image.building || image.error) sec.append(h("pre", null, image.log.join("\n")));
+  if (image.building || image.error) {
+    const pre = h("pre", { onscroll: (e) => buildLogScroll.set("__image__", e.target.scrollTop) }, image.log.join("\n"));
+    pre.scrollTop = buildLogScroll.has("__image__") ? buildLogScroll.get("__image__") : pre.scrollHeight;
+    sec.append(pre);
+  }
 }
 
 // ------------------------------------------------------------------ loop
