@@ -28,7 +28,22 @@ let state = null;
 const openScreens = new Set();   // projects whose screen panel is open
 const screenScroll = new Map();  // project -> last scrollTop, survives the periodic full re-render
 const dockerChoice = {};         // project -> checkbox state, survives re-render
+const openSessions = new Set();  // projects whose resume panel is open
+const sessionsCache = new Map(); // project -> sessions array, fetched lazily when the panel opens
 let busy = false;                // pause polling re-render while the user is typing
+
+function timeAgo(epochSeconds) {
+  const mins = Math.floor((Date.now() / 1000 - epochSeconds) / 60);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo ago`;
+  return `${Math.floor(months / 12)}y ago`;
+}
 
 function banner(msg) {
   $("banner").hidden = !msg;
@@ -134,12 +149,35 @@ function renderProject(p) {
       onclick: () => act(() => api(`/api/projects/${p.name}/start`, { docker: dockerBox.checked, use_devcontainer: false })) }, "Start (base image)") : null,
     p.session ? h("button", { class: "danger", onclick: () => act(() => api(`/api/projects/${p.name}/stop`, {})) }, "Stop") : null,
     running ? h("button", { onclick: () => { if (openScreens.has(p.name)) { openScreens.delete(p.name); screenScroll.delete(p.name); } else openScreens.add(p.name); renderProjects(); pollScreens(); } }, openScreens.has(p.name) ? "Hide screen" : "Screen") : null,
+    h("button", { onclick: () => { if (openSessions.has(p.name)) { openSessions.delete(p.name); } else { openSessions.add(p.name); loadSessions(p.name); } renderProjects(); } }, openSessions.has(p.name) ? "Hide sessions" : "Resume…"),
     h("label", { title: "Lets the session start arbitrary containers on the nested daemon, which is effectively root on this server" }, dockerBox, "Docker access (root-equivalent)"),
     h("button", { class: "danger", onclick: () => act(() => deleteProject(p.name)) }, "Delete"),
   ));
 
   if (running && openScreens.has(p.name)) el.append(screenPanel(p.name));
+  if (openSessions.has(p.name)) el.append(sessionsPanel(p.name));
   return el;
+}
+
+async function loadSessions(name) {
+  sessionsCache.set(name, "loading");
+  renderProjects();
+  try { sessionsCache.set(name, (await api(`/api/projects/${name}/sessions`)).sessions); }
+  catch (e) { sessionsCache.set(name, []); banner(e.message); }
+  renderProjects();
+}
+
+function sessionsPanel(name) {
+  const cached = sessionsCache.get(name);
+  if (cached === "loading" || cached === undefined) return h("p", { class: "muted" }, "loading…");
+  if (!cached.length) return h("p", { class: "muted" }, "no previous sessions found");
+  const select = h("select", {},
+    ...cached.map((s) => h("option", { value: s.id }, `${s.label || s.id.slice(0, 8)} — ${timeAgo(s.mtime)}`)));
+  const resume = () => act(() => {
+    openSessions.delete(name);
+    return api(`/api/projects/${name}/start`, { docker: dockerChoice[name] ?? false, use_devcontainer: true, resume: select.value });
+  });
+  return h("div", { class: "row" }, select, h("button", { class: "primary", onclick: resume }, "Resume"));
 }
 
 async function deleteProject(name) {

@@ -22,7 +22,7 @@ section:empty { display: none; }
 .row + .row, .row + p, p + .row, .row + pre, pre + .row { margin-top: 10px; }
 .grow { flex: 1 1 160px; }
 .spread { justify-content: space-between; }
-input[type=text] { font: inherit; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px;
+input[type=text], select { font: inherit; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px;
   background: var(--bg); color: var(--fg); min-width: 0; }
 button { font: inherit; padding: 9px 14px; border-radius: 8px; border: 1px solid var(--line);
   background: var(--card); color: var(--fg); cursor: pointer; }

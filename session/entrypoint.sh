@@ -47,7 +47,7 @@ claude auth status --text || echo "entrypoint: NOT logged in — log in from the
 # claude runs inside tmux so the hub can show the screen and send keystrokes
 # (answering the odd prompt from a phone). The container lives exactly as long
 # as the tmux session; if claude exits the container exits and Docker restarts it.
-export PROJECT TARGET
+export PROJECT TARGET RESUME_SESSION_ID="${RESUME_SESSION_ID:-}"
 tmux new-session -d -s claude -x 160 -y 50 /usr/local/bin/run-claude.sh
 
 while tmux has-session -t claude 2>/dev/null; do

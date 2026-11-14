@@ -53,6 +53,7 @@ SESSION_MEMORY = os.environ.get("SESSION_MEMORY", "")
 SESSION_CPUS = os.environ.get("SESSION_CPUS", "")
 
 NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+SESSION_ID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 GITHUB_URL_RE = re.compile(r"https://github\.com/([\w.-]+)/([\w.-]+?)(?:\.git)?/?")
 CODE_RE = re.compile(r"[A-Za-z0-9_\-#.~+/=%]{1,512}")
 LOGIN_URL_RE = re.compile(
@@ -556,6 +557,73 @@ def unsynced_work(name):
     return warnings
 
 
+def project_transcripts_dir(name):
+    # Matched by the cwd Claude itself recorded, not by guessing its path-escaping scheme.
+    root = CLAUDE_DIR / "projects"
+    if not root.is_dir():
+        return None
+    needle = f'"cwd":"/home/dev/workspace/{name}"'.encode()
+    for d in root.iterdir():
+        if not d.is_dir():
+            continue
+        for f in d.glob("*.jsonl"):
+            try:
+                chunk = f.read_bytes()[:8192]
+            except OSError:
+                continue
+            if needle in chunk:
+                return d
+    return None
+
+
+def session_label(path):
+    # Best-effort: the session's AI-generated title, else its first user message.
+    try:
+        with path.open("r", errors="ignore") as fh:
+            chunk = fh.read(16384)
+    except OSError:
+        return None
+    lines = [l for l in chunk.splitlines() if l]
+    records = []
+    for line in lines:
+        try:
+            records.append(json.loads(line))
+        except ValueError:
+            continue
+    for rec in records:
+        if rec.get("type") == "ai-title" and rec.get("aiTitle"):
+            return rec["aiTitle"][:120]
+    for rec in records:
+        if rec.get("type") != "user":
+            continue
+        content = (rec.get("message") or {}).get("content")
+        if isinstance(content, str) and content.strip():
+            return content.strip().splitlines()[0][:120]
+        if isinstance(content, list):
+            for block in content:
+                text = isinstance(block, dict) and block.get("type") == "text" and block.get("text", "").strip()
+                if text:
+                    return text.splitlines()[0][:120]
+    return None
+
+
+def list_project_sessions(name):
+    d = project_transcripts_dir(name)
+    if d is None:
+        return []
+    sessions = []
+    for f in d.glob("*.jsonl"):
+        if not SESSION_ID_RE.fullmatch(f.stem):
+            continue
+        try:
+            mtime = f.stat().st_mtime
+        except OSError:
+            continue
+        sessions.append({"id": f.stem, "mtime": mtime, "label": session_label(f)})
+    sessions.sort(key=lambda s: s["mtime"], reverse=True)
+    return sessions
+
+
 def container_name(project):
     return f"cc-{project}"
 
@@ -579,12 +647,17 @@ def list_sessions():
     return out
 
 
-def start_session(name, docker_access, use_devcontainer=True):
+def start_session(name, docker_access, use_devcontainer=True, resume_session=None):
     valid_name(name)
     if not (PROJECTS / name / ".git").exists():
         raise ApiError("project is not cloned")
     if not auth_status().get("loggedIn"):
         raise ApiError("log in to Claude first")
+    if resume_session is not None:
+        if not SESSION_ID_RE.fullmatch(resume_session):
+            raise ApiError("invalid session id")
+        if resume_session not in {s["id"] for s in list_project_sessions(name)}:
+            raise ApiError("unknown session id for this project")
     dc = project_devcontainer(name) if use_devcontainer else None
     if dc:
         session_image = project_image_tag(name)
@@ -622,6 +695,8 @@ def start_session(name, docker_access, use_devcontainer=True):
     ]
     if dc and dc["post_create"]:
         args += ["-e", f"DEVCONTAINER_POST_CREATE_COMMAND={dc['post_create']}"]
+    if resume_session:
+        args += ["-e", f"RESUME_SESSION_ID={resume_session}"]
     if SESSION_MEMORY:
         args += ["--memory", SESSION_MEMORY]
     if SESSION_CPUS:
@@ -838,8 +913,14 @@ def project_image_build(name):
 @app.post("/api/projects/<name>/start")
 def project_start(name):
     body = request.get_json(silent=True) or {}
-    start_session(name, bool(body.get("docker")), body.get("use_devcontainer", True))
+    start_session(name, bool(body.get("docker")), body.get("use_devcontainer", True), body.get("resume") or None)
     return jsonify(ok=True)
+
+
+@app.get("/api/projects/<name>/sessions")
+def project_sessions(name):
+    valid_name(name)
+    return jsonify(sessions=list_project_sessions(name))
 
 
 @app.post("/api/projects/<name>/stop")
