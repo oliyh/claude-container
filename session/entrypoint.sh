@@ -44,13 +44,51 @@ fi
 echo "entrypoint: logged-in check"
 claude auth status --text || echo "entrypoint: NOT logged in — log in from the hub UI"
 
+# Finds the most recently touched transcript whose recorded cwd is this
+# project, the same way the hub locates sessions to offer in its resume list.
+latest_session_id() {
+  local needle="\"cwd\":\"/home/dev/workspace/${PROJECT}\""
+  local best_file="" best_mtime=0 f mtime
+  shopt -s nullglob
+  for f in "${CLAUDE_CONFIG_DIR:-/claude-config}"/projects/*/*.jsonl; do
+    head -c 8192 "$f" 2>/dev/null | grep -qF "$needle" || continue
+    mtime=$(stat -c %Y "$f" 2>/dev/null) || continue
+    if (( mtime > best_mtime )); then
+      best_mtime=$mtime
+      best_file=$f
+    fi
+  done
+  [[ -n "$best_file" ]] && basename "$best_file" .jsonl
+}
+
+# SESSION_MARKER lives in the container's own writable layer, not under any
+# bind mount, so it is wiped whenever the hub recreates the container (the
+# Start/Restart button does `docker rm` + `run`, for a deliberate fresh
+# conversation) but survives a plain restart of this same container — a dind
+# bounce, an OOM-kill, a host reboot. If it's there and the hub didn't already
+# pick a session to resume, pick up where this container left off instead of
+# starting a new conversation.
+SESSION_MARKER=/tmp/claude-session-id
+export PROJECT TARGET RESUME_SESSION_ID="${RESUME_SESSION_ID:-}" CLAUDE_CONFIG_DIR
+
+if [[ -z "$RESUME_SESSION_ID" && -f "$SESSION_MARKER" ]]; then
+  RESUME_SESSION_ID="$(cat "$SESSION_MARKER" 2>/dev/null || true)"
+  export RESUME_SESSION_ID
+  [[ -n "$RESUME_SESSION_ID" ]] && echo "entrypoint: resuming session $RESUME_SESSION_ID from before this restart"
+fi
+
 # claude runs inside tmux so the hub can show the screen and send keystrokes
 # (answering the odd prompt from a phone). The container lives exactly as long
 # as the tmux session; if claude exits the container exits and Docker restarts it.
-export PROJECT TARGET RESUME_SESSION_ID="${RESUME_SESSION_ID:-}"
 tmux new-session -d -s claude -x 160 -y 50 /usr/local/bin/run-claude.sh
 
 while tmux has-session -t claude 2>/dev/null; do
+  # `|| true`: latest_session_id exits 1 until the first transcript appears,
+  # and a failing command substitution inside an assignment trips `set -e`
+  # even though nothing is actually wrong — it would kill this loop (and the
+  # still-running tmux/claude under it) on every empty check otherwise.
+  id="$(latest_session_id || true)"
+  [[ -n "$id" ]] && echo "$id" > "$SESSION_MARKER"
   sleep 5
 done
 echo "entrypoint: claude exited; restarting container in 10s"
