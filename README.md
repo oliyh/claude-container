@@ -70,6 +70,7 @@ If sign-in loops or shows a redirect error, the redirect URI in Google must matc
 | Start / Restart | Recreates the container (state lives in `/data`, so nothing is lost). |
 | Screen | Live view of Claude's terminal, with a text box and Enter/Esc/arrows/Ctrl-C. |
 | Rebuild image | Pulls the latest Claude Code (and base packages). Restart sessions afterwards to use it. |
+| Build image *(devcontainer projects)* | Shown instead when a project has `.devcontainer/devcontainer.json` with a `build.dockerfile`. Builds that Dockerfile as a base, then stacks tmux/Node/Claude Code/the `dev` user on top of it, so the session runs the project's own base image (its own language toolchain, any binaries it bakes in) instead of the shared one. `postCreateCommand` runs on every session start. Only those two fields are read — `features` and other devcontainer/VS Code fields are ignored. |
 | Log out / in | Re-do the login cycle any time. |
 
 Sessions restart automatically with the daemon. Claude is launched as `claude --dangerously-skip-permissions --remote-control <project>` so unattended runs never stall on a permission prompt — the blast radius is the session container (its project dir, its home, the shared Claude config, and the GitHub token if set).
@@ -88,12 +89,12 @@ Sessions restart automatically with the daemon. Claude is launched as `claude --
 
 **Docker access is root-equivalent.** `dind` is `privileged`, which exposes the host's devices to anything that can drive its daemon. A session started with the *Docker access* box ticked gets client certs for that daemon, so treat it as having root on the server. Leave it off unless a project needs to run containers. Without the box, a session can reach the daemon's port but is rejected at the TLS handshake.
 
-**Cloning** is limited to `ALLOWED_OWNERS` (default `GITHUB_OWNER`), because a cloned repo's own hooks and MCP config run unattended in a session.
+**Cloning** is limited to `ALLOWED_OWNERS` (default `GITHUB_OWNER`), because a cloned repo's own hooks, MCP config, devcontainer Dockerfile, and `postCreateCommand` all run unattended (build or shell) on the strength of that same trust.
 
 **Not done.** Image builds download unpinned installers and the latest Claude Code (the Rebuild button is meant to). Anyone who controls your claude.ai account can drive these sessions. The stronger fixes are rootless/Sysbox instead of privileged dind, a per-project Claude config dir, and a per-project GitHub token.
 
 ## Layout
 
 - `hub/` — Flask app + static UI (`app.py`, `static/`), runs the login flow and talks to the nested daemon.
-- `session/` — image each project container runs (Java 21, Clojure, Leiningen, Node 20, Playwright, gh, Claude Code).
+- `session/` — image each project container runs (Java 21, Clojure, Leiningen, Node 20, Playwright, gh, Claude Code). `Dockerfile` takes `BASE_IMAGE`/`LANG_TOOLS` build args so a project's own devcontainer Dockerfile can be used as the base instead of the default `ubuntu:24.04`.
 - `docker-compose.yaml` — `auth-proxy`, `hub`, `dind`.

@@ -21,12 +21,25 @@ if [[ -n "${GITHUB_TOKEN:-}" ]]; then
     '!f() { echo username=x-access-token; echo "password=$GITHUB_TOKEN"; }; f'
   export GH_TOKEN="$GITHUB_TOKEN"
 fi
+# Set by the image when it installed its own JDK (see session/Dockerfile) —
+# absent when a project's devcontainer base brings its own JAVA_HOME instead.
+[[ -f /etc/profile.d/claude-java-home.sh ]] && source /etc/profile.d/claude-java-home.sh
+
 [[ -n "${GIT_USER_NAME:-}" ]] && git config --global user.name "$GIT_USER_NAME"
 [[ -n "${GIT_USER_EMAIL:-}" ]] && git config --global user.email "$GIT_USER_EMAIL"
 git config --global --add safe.directory "$TARGET"
 
 # Best-effort fast-forward; a dirty tree or a repo with no upstream is fine.
 git -C "$TARGET" pull --ff-only 2>&1 || echo "entrypoint: skipped pull"
+
+# A project's own devcontainer.json postCreateCommand (e.g. starting a bundled
+# database), passed in by the hub. Runs on every start, not just creation —
+# fine as long as it's idempotent, same as the devcontainer CLI would do for
+# postStartCommand.
+if [[ -n "${DEVCONTAINER_POST_CREATE_COMMAND:-}" ]]; then
+  echo "entrypoint: running devcontainer postCreateCommand"
+  (cd "$TARGET" && eval "$DEVCONTAINER_POST_CREATE_COMMAND") || echo "entrypoint: postCreateCommand failed"
+fi
 
 echo "entrypoint: logged-in check"
 claude auth status --text || echo "entrypoint: NOT logged in — log in from the hub UI"

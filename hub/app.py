@@ -314,7 +314,13 @@ login = LoginFlow()
 # ---------------------------------------------------------------- session image
 
 class ImageBuild:
-    def __init__(self):
+    """Builds and tracks one image tag. `steps_fn()` returns a list of
+    docker-build argument lists, run in order (a project image needs two: its
+    own devcontainer base, then the claude layer on top of it)."""
+
+    def __init__(self, tag, steps_fn):
+        self.tag = tag
+        self.steps_fn = steps_fn
         self.lock = threading.Lock()
         self.building = False
         self.log = []
@@ -322,7 +328,7 @@ class ImageBuild:
 
     def exists(self):
         try:
-            return docker("image", "inspect", IMAGE, timeout=20).returncode == 0
+            return docker("image", "inspect", self.tag, timeout=20).returncode == 0
         except subprocess.TimeoutExpired:
             return False
 
@@ -344,17 +350,18 @@ class ImageBuild:
 
     def _run(self):
         try:
-            p = subprocess.Popen(
-                ["docker", "build", "--progress=plain", "-t", IMAGE,
-                 "--build-arg", f"CACHEBUST={int(time.time())}", SESSION_CONTEXT],
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-            )
-            for line in p.stdout:
-                with self.lock:
-                    self.log.append(line.rstrip()[:300])
-                    del self.log[:-300]
-            if p.wait() != 0:
-                self.error = "build failed — see log"
+            for args in self.steps_fn():
+                p = subprocess.Popen(
+                    ["docker", "build", "--progress=plain", *args],
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                )
+                for line in p.stdout:
+                    with self.lock:
+                        self.log.append(line.rstrip()[:300])
+                        del self.log[:-300]
+                if p.wait() != 0:
+                    self.error = "build failed — see log"
+                    return
         except Exception as e:  # noqa: BLE001 — surfaced in the UI
             self.error = str(e)
         finally:
@@ -362,7 +369,102 @@ class ImageBuild:
                 self.building = False
 
 
-image = ImageBuild()
+image = ImageBuild(IMAGE, lambda: [
+    ["-t", IMAGE, "--build-arg", f"CACHEBUST={int(time.time())}", SESSION_CONTEXT],
+])
+
+
+def _strip_jsonc(text):
+    """Strip `//` line comments outside of string literals, so devcontainer.json
+    (which allows them) parses as plain JSON. Not a full JSONC parser (no block
+    comments, no trailing commas) — enough for the files this needs to read."""
+    out, in_str, i, n = [], False, 0, len(text)
+    while i < n:
+        c = text[i]
+        if in_str:
+            out.append(c)
+            if c == "\\" and i + 1 < n:
+                out.append(text[i + 1])
+                i += 2
+                continue
+            if c == '"':
+                in_str = False
+            i += 1
+            continue
+        if c == '"':
+            in_str = True
+            out.append(c)
+            i += 1
+            continue
+        if c == "/" and i + 1 < n and text[i + 1] == "/":
+            while i < n and text[i] != "\n":
+                i += 1
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def project_devcontainer(name):
+    """Path to a project's own devcontainer Dockerfile and build context, plus
+    its postCreateCommand, or None. Only the `build.dockerfile`/`build.context`
+    shape (or the older top-level `dockerFile`) is understood — enough to let a
+    project bring its own base image. `features` and VS Code-specific fields
+    are not applied; the session still needs its own tmux/claude/user layer
+    stacked on top, which is what the project image build does (see
+    project_build_steps). `postCreateCommand` is run as-is on every session
+    start (not just creation) — fine for idempotent setup like the stardev
+    example, which already cleans up its own pid/lock files before restarting.
+    Running it is no more trust than cloning already grants: a cloned repo's
+    own hooks/MCP config already run unattended in a session (see README)."""
+    dc_dir = PROJECTS / name / ".devcontainer"
+    config = dc_dir / "devcontainer.json"
+    if not config.is_file():
+        return None
+    try:
+        spec = json.loads(_strip_jsonc(config.read_text()))
+    except (OSError, json.JSONDecodeError):
+        return None
+    build = spec.get("build") or {}
+    dockerfile = build.get("dockerfile") or spec.get("dockerFile")
+    if not dockerfile:
+        return None
+    path = dc_dir / dockerfile
+    if not path.is_file():
+        return None
+    post_create = spec.get("postCreateCommand")
+    return {
+        "dockerfile": path,
+        "context": dc_dir / (build.get("context") or "."),
+        "post_create": post_create if isinstance(post_create, str) else None,
+    }
+
+
+def project_image_tag(name):
+    return f"claude-hub-session-project:{name}"
+
+
+def project_build_steps(name):
+    dc = project_devcontainer(name)
+    if not dc:
+        raise ApiError("project has no devcontainer")
+    base_tag = f"claude-hub-session-base:{name}"
+    return [
+        ["-t", base_tag, "-f", str(dc["dockerfile"]), str(dc["context"])],
+        ["-t", project_image_tag(name),
+         "--build-arg", f"BASE_IMAGE={base_tag}", "--build-arg", "LANG_TOOLS=0",
+         "--build-arg", f"CACHEBUST={int(time.time())}", SESSION_CONTEXT],
+    ]
+
+
+project_builds = {}  # project name -> ImageBuild, for projects with their own devcontainer
+
+
+def get_project_build(name):
+    pb = project_builds.get(name)
+    if pb is None:
+        pb = project_builds[name] = ImageBuild(project_image_tag(name), lambda: project_build_steps(name))
+    return pb
 
 
 # ---------------------------------------------------------------- projects
@@ -483,8 +585,15 @@ def start_session(name, docker_access):
         raise ApiError("project is not cloned")
     if not auth_status().get("loggedIn"):
         raise ApiError("log in to Claude first")
-    if not image.snapshot()["ready"]:
-        raise ApiError("session image is not built yet")
+    dc = project_devcontainer(name)
+    if dc:
+        session_image = project_image_tag(name)
+        if not get_project_build(name).snapshot()["ready"]:
+            raise ApiError("project image is not built yet")
+    else:
+        session_image = IMAGE
+        if not image.snapshot()["ready"]:
+            raise ApiError("session image is not built yet")
     ensure_claude_config()
     # Pre-create the project's mount point inside the home mount. Otherwise
     # Docker creates it as root, and the hub could never clean the home dir up.
@@ -511,6 +620,8 @@ def start_session(name, docker_access):
         "-v", f"{PROJECTS / name}:/home/dev/workspace/{name}",
         "-v", f"{HOMES / name}:/home/dev",
     ]
+    if dc and dc["post_create"]:
+        args += ["-e", f"DEVCONTAINER_POST_CREATE_COMMAND={dc['post_create']}"]
     if SESSION_MEMORY:
         args += ["--memory", SESSION_MEMORY]
     if SESSION_CPUS:
@@ -527,7 +638,7 @@ def start_session(name, docker_access):
             "-e", "DOCKER_TLS_VERIFY=1",
             "-e", "DOCKER_CERT_PATH=/docker-certs",
         ]
-    args += [IMAGE, name]
+    args += [session_image, name]
     p = docker(*args, timeout=120)
     if p.returncode != 0:
         raise ApiError(p.stderr.strip()[-400:] or "docker run failed", 500)
@@ -592,15 +703,18 @@ def state():
         docker_error = str(e)
     names = {p.name for p in PROJECTS.iterdir() if p.is_dir() and NAME_RE.fullmatch(p.name)}
     names |= set(jobs) | set(sessions)
-    projects = [
-        {
+    projects = []
+    for n in sorted(names):
+        cloned = (PROJECTS / n / ".git").exists()
+        dc = project_devcontainer(n) if cloned else None
+        projects.append({
             "name": n,
-            "cloned": (PROJECTS / n / ".git").exists(),
+            "cloned": cloned,
             "session": sessions.get(n),
             "job": jobs.get(n),
-        }
-        for n in sorted(names)
-    ]
+            "devcontainer": bool(dc),
+            "image": get_project_build(n).snapshot() if dc else None,
+        })
     return jsonify(
         user=ALLOWED_EMAIL,
         auth=auth_status(),
@@ -696,6 +810,8 @@ def project_delete(name):
     if warnings and not (request.get_json(silent=True) or {}).get("force"):
         return jsonify(error="project has work that is not in git", warnings=warnings), 409
     docker("rm", "-f", container_name(name), timeout=60)
+    docker("rmi", "-f", project_image_tag(name), f"claude-hub-session-base:{name}", timeout=30)
+    project_builds.pop(name, None)
     jobs.pop(name, None)
     try:
         shutil.rmtree(root)
@@ -707,6 +823,15 @@ def project_delete(name):
         pass
     except OSError as e:
         raise ApiError(f"project removed, but its home directory could not be: {e}", 500)
+    return jsonify(ok=True)
+
+
+@app.post("/api/projects/<name>/image/build")
+def project_image_build(name):
+    valid_name(name)
+    if not project_devcontainer(name):
+        raise ApiError("project has no devcontainer")
+    get_project_build(name).build()
     return jsonify(ok=True)
 
 

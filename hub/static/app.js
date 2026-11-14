@@ -110,6 +110,18 @@ function renderProject(p) {
   }
   if (!p.cloned) return el;
 
+  if (p.devcontainer) {
+    const img = p.image || {};
+    const pill = img.building ? h("span", { class: "pill warn" }, "building…")
+      : img.ready ? h("span", { class: "pill ok" }, "image ready")
+      : h("span", { class: "pill bad" }, "image not built");
+    el.append(h("div", { class: "row spread" },
+      h("span", null, "devcontainer: ", pill),
+      h("button", { disabled: img.building, onclick: () => act(() => api(`/api/projects/${p.name}/image/build`, {})) }, img.ready ? "Rebuild image" : "Build image")));
+    if (img.error) el.append(h("p", { class: "bad" }, img.error));
+    if (img.building || img.error) el.append(h("pre", null, (img.log || []).join("\n")));
+  }
+
   el.append(h("div", { class: "row" },
     h("button", { class: "primary", onclick: () => act(() => api(`/api/projects/${p.name}/start`, { docker: dockerBox.checked })) }, p.session ? "Restart" : "Start"),
     p.session ? h("button", { class: "danger", onclick: () => act(() => api(`/api/projects/${p.name}/stop`, {})) }, "Stop") : null,
